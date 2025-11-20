@@ -1,0 +1,6 @@
+kakao:
+  oauth:
+    client-id: e409825c72100433f7cd0a17f89b06e6
+    client-secret: 2WkmJEryzWPT3WivNZFdih0Rfn8cFfqJ
+    token-uri: https://kauth.kakao.com/oauth/token
+    user-info-uri: https://kapi.kakao.com/v2/user/me
