@@ -30,3 +30,4 @@ public class SwaggerConfig {
                 .packagesToScan("com.dbapplication.bouget.controller")
                 .build();
     }
+}
