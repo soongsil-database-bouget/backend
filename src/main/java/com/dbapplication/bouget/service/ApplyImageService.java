@@ -1,0 +1,254 @@
+package com.dbapplication.bouget.service;
+
+import com.dbapplication.bouget.dto.ApplyImageResponse;
+import com.dbapplication.bouget.entity.ApplyImage;
+import com.dbapplication.bouget.entity.Bouquet;
+import com.dbapplication.bouget.entity.RecommendationSession;
+import com.dbapplication.bouget.entity.User;
+import com.dbapplication.bouget.entity.enums.ApplyStatus;
+import com.dbapplication.bouget.repository.ApplyImageRepository;
+import com.dbapplication.bouget.repository.BouquetRepository;
+import com.dbapplication.bouget.repository.RecommendationSessionRepository;
+import com.dbapplication.bouget.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.UUID;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ApplyImageService {
+
+    private final UserRepository userRepository;
+    private final BouquetRepository bouquetRepository;
+    private final RecommendationSessionRepository sessionRepository;
+    private final ApplyImageRepository applyImageRepository;
+    private final WebClient fastapiWebClient;   // WebClientConfig 에서 fastapi용으로 등록한 Bean
+
+    @Value("${file.upload-dir}")
+    private String uploadDir; // 예: /var/www/bouget (실제 경로는 yml에서 설정)
+
+    /**
+     * 이미지 적용 생성 플로우
+     * 1) 유저 / 부케 / 세션 조회
+     * 2) 유저 이미지 서버에 저장 → srcImageUrl
+     * 3) 부케 이미지 바이트 가져오기
+     * 4) FastAPI /api/composite-bouquet 호출 (multipart)
+     * 5) FastAPI result_image_url 로 결과 이미지 다운로드 → 우리 서버에 저장 → genImageUrl
+     * 6) ApplyImage 엔티티 저장
+     */
+    @Transactional
+    public ApplyImageResponse createApplyImage(
+            Long userId,
+            Long bouquetId,
+            Long sessionId,
+            MultipartFile userImageFile
+    ) {
+        // 1. 엔티티 조회
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found. id=" + userId));
+
+        Bouquet bouquet = bouquetRepository.findById(bouquetId)
+                .orElseThrow(() -> new IllegalArgumentException("Bouquet not found. id=" + bouquetId));
+
+        RecommendationSession session = null;
+        if (sessionId != null) {
+            session = sessionRepository.findById(sessionId)
+                    .orElseThrow(() -> new IllegalArgumentException("RecommendationSession not found. id=" + sessionId));
+        }
+
+        try {
+            // 2. 유저 원본 이미지 서버에 저장
+            String srcImageUrl = saveUserSrcImage(userImageFile);
+
+            // 3. 부케 이미지 바이트 가져오기
+            byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
+
+            // 4. FastAPI 호출해서 합성 이미지 URL 받기
+            String resultImageUrlFromFastApi = callFastApiComposite(userImageFile, bouquetBytes);
+
+            // 5. 결과 이미지 다운로드해서 우리 서버에 저장
+            String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi);
+
+            // 6. ApplyImage 엔티티 저장
+            ApplyImage applyImage = ApplyImage.builder()
+                    .user(user)
+                    .bouquet(bouquet)
+                    .session(session)
+                    .srcImageUrl(srcImageUrl)
+                    .genImageUrl(genImageUrl)
+                    .status(ApplyStatus.DONE)
+                    .build();
+
+            ApplyImage saved = applyImageRepository.save(applyImage);
+
+            return toResponse(saved);
+        } catch (IOException e) {
+            log.error("createApplyImage IOException", e);
+            throw new RuntimeException("이미지 처리 중 오류가 발생했습니다.", e);
+        }
+    }
+
+    /**
+     * ApplyImage 단건 조회
+     */
+    @Transactional(readOnly = true)
+    public ApplyImageResponse getApplyImage(Long id) {
+        ApplyImage applyImage = applyImageRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("ApplyImage not found. id=" + id));
+        return toResponse(applyImage);
+    }
+
+    // === 내부 메서드들 ===
+
+    /**
+     * 유저가 업로드한 원본 이미지를 서버에 저장하고, 접근 가능한 URL을 반환
+     */
+    private String saveUserSrcImage(MultipartFile userImageFile) throws IOException {
+        String originalFilename = userImageFile.getOriginalFilename();
+        String ext = getExtensionSafe(originalFilename);
+        String filename = UUID.randomUUID() + (ext.isEmpty() ? "" : "." + ext);
+
+        Path savePath = Paths.get(uploadDir, "apply", "src", filename);
+        Files.createDirectories(savePath.getParent());
+
+        Files.copy(userImageFile.getInputStream(), savePath, StandardCopyOption.REPLACE_EXISTING);
+
+        // TODO: 실제 서빙 URL 패턴에 맞춰 수정
+        // 예: Nginx나 Spring static mapping 에 맞게 `/images/...` 같은 형태
+        return "/images/apply/src/" + filename;
+    }
+
+    /**
+     * Bouquet 엔티티에서 이미지 URL을 가져와서 byte[] 로 다운로드
+     * - Bouquet 엔티티의 필드 이름에 따라 아래의 getImageUrl() 부분 수정 필요
+     */
+    private byte[] loadBouquetImageBytes(Bouquet bouquet) throws IOException {
+        // TODO: 실제 필드명에 맞게 수정. 예시로 imageUrl 사용
+        String bouquetImageUrl = bouquet.getImageUrl();  // <- 네 엔티티에 맞게 바꿔줘야 함
+
+        if (bouquetImageUrl == null || bouquetImageUrl.isBlank()) {
+            throw new IllegalStateException("Bouquet image URL is empty. bouquetId=" + bouquet.getId());
+        }
+
+        try (InputStream in = new URL(bouquetImageUrl).openStream()) {
+            return in.readAllBytes();
+        }
+    }
+
+    /**
+     * FastAPI /api/composite-bouquet 호출
+     * - user_image: 업로드 이미지
+     * - bouquet_image: 부케 이미지 바이트
+     * - 결과: result_image_url (FastAPI에서 절대 URL로 반환하도록 수정해둔 상태)
+     */
+    private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
+        MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
+
+        // user_image
+        bodyBuilder.part("user_image", userImageFile.getResource())
+                .filename(userImageFile.getOriginalFilename())
+                .contentType(userImageFile.getContentType() == null
+                        ? MediaType.IMAGE_JPEG
+                        : MediaType.parseMediaType(userImageFile.getContentType()));
+
+        // bouquet_image
+        ByteArrayResource bouquetResource = new ByteArrayResource(bouquetImageBytes) {
+            @Override
+            public String getFilename() {
+                return "bouquet.jpg";
+            }
+        };
+
+        bodyBuilder.part("bouquet_image", bouquetResource)
+                .filename("bouquet.jpg")
+                .contentType(MediaType.IMAGE_JPEG);
+
+        FastApiCompositeResponse fastRes = fastapiWebClient.post()
+                .uri("/api/composite-bouquet")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
+                .retrieve()
+                .bodyToMono(FastApiCompositeResponse.class)
+                .block();
+
+        if (fastRes == null || fastRes.result_image_url() == null || fastRes.result_image_url().isBlank()) {
+            throw new IllegalStateException("FastAPI result_image_url is null or empty");
+        }
+
+        log.info("FastAPI composite result url = {}", fastRes.result_image_url());
+        return fastRes.result_image_url();
+    }
+
+    /**
+     * FastAPI가 준 result_image_url 로부터 이미지를 다운로드해서 우리 서버에 저장
+     */
+    private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
+        String filename = UUID.randomUUID() + ".png";
+        Path savePath = Paths.get(uploadDir, "apply", "gen", filename);
+        Files.createDirectories(savePath.getParent());
+
+        try (InputStream in = new URL(resultImageUrl).openStream()) {
+            Files.copy(in, savePath, StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        // TODO: 실제 서빙 URL 패턴에 맞춰 수정
+        return "/images/apply/gen/" + filename;
+    }
+
+    /**
+     * ApplyImage -> ApplyImageResponse 매핑
+     */
+    private ApplyImageResponse toResponse(ApplyImage entity) {
+        return new ApplyImageResponse(
+                entity.getId(),
+                entity.getUser().getId(),
+                entity.getBouquet().getId(),
+                entity.getSession() != null ? entity.getSession().getId() : null,
+                entity.getSrcImageUrl(),
+                entity.getGenImageUrl(),
+                entity.getStatus(),
+                entity.getCreatedAt()
+        );
+    }
+
+    /**
+     * 파일명에서 확장자만 안전하게 추출 (예: "a.jpg" -> "jpg")
+     */
+    private String getExtensionSafe(String filename) {
+        if (filename == null) return "";
+        int idx = filename.lastIndexOf('.');
+        if (idx == -1 || idx == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(idx + 1);
+    }
+
+    /**
+     * FastAPI 응답 DTO
+     * - JSON 구조에 맞춰 snake_case 필드명 그대로 사용 (Jackson이 매핑함)
+     */
+    private record FastApiCompositeResponse(
+            String status,
+            String original_user_file,
+            String original_bouquet_file,
+            String result_image_url
+    ) {}
+}

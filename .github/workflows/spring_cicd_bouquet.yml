@@ -1,0 +1,74 @@
+name: spring_cicd_bouquet
+
+on:
+  push:
+    branches: [ develop ]
+    paths:
+      - 'src/**'
+      - 'build.gradle*'
+      - 'settings.gradle*'
+      - '.github/workflows/spring_cicd_bouquet.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: bouquet-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SPRING_TARGET_DIR: /home/ec2-user/app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build with Gradle
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -x test --stacktrace
+
+      - name: Upload JAR to EC2
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build/libs/*.jar"
+          target: "${{ env.SPRING_TARGET_DIR }}/"
+          overwrite: true
+          timeout: "60s"
+          strip_components: 0
+
+      - name: Rename JAR → app.jar & restart bouquet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ec2-user/app
+
+            # 가장 최근 jar 파일을 app.jar로 교체
+            LATEST_JAR=$(ls -t *.jar | head -n 1)
+            if [ -z "$LATEST_JAR" ]; then
+              echo "No JAR file found in /home/ec2-user/app"
+              exit 1
+            fi
+
+            cp "$LATEST_JAR" app.jar
+
+            sudo systemctl stop bouquet.service || true
+            sudo systemctl daemon-reload
+            sudo systemctl start bouquet.service
