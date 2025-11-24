@@ -18,6 +18,13 @@ public class Bouquet {
     @Column(nullable = false, length = 255)
     private String name;
 
+    @Column
+    private int price;
+
+    @Lob
+    @Column
+    private String reason;
+
     @Lob
     @Column
     private String description;
