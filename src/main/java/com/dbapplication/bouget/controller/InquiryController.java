@@ -1,6 +1,10 @@
 package com.dbapplication.bouget.controller;
 
 
+import com.dbapplication.bouget.dto.InquiryCreateRequest;
+import com.dbapplication.bouget.dto.InquiryListResponse;
+import com.dbapplication.bouget.dto.InquiryResponse;
+import com.dbapplication.bouget.service.InquiryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;

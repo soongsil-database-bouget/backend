@@ -1,5 +1,9 @@
 package com.dbapplication.bouget.controller;
 
+import com.dbapplication.bouget.dto.RecommendationSessionListResponse;
+import com.dbapplication.bouget.dto.RecommendationSessionRequest;
+import com.dbapplication.bouget.dto.RecommendationSessionResponse;
+import com.dbapplication.bouget.service.RecommendationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
