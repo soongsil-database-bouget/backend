@@ -34,13 +34,13 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # bootJar만 빌드해서 plain.jar 안 섞이게
+      # ⚙️ bootJar만 빌드 (plain.jar 안 만들게)
       - name: Build Spring Boot JAR (bootJar only)
         run: |
           chmod +x gradlew
           ./gradlew clean bootJar -x test --stacktrace
 
-      # bootJar만 EC2로 업로드 (끝이 SNAPSHOT.jar인 것만)
+      # 📦 bootJar만 EC2로 업로드
       - name: Upload JAR to EC2
         uses: appleboy/scp-action@v0.1.4
         with:
@@ -51,9 +51,10 @@ jobs:
           target: "${{ env.SPRING_TARGET_DIR }}/"
           overwrite: true
           timeout: "60s"
-          # build/libs 두 단계 경로를 떼고 바로 /app 아래에 파일만 떨어뜨림
+          # build/libs 제거하고 바로 /home/ec2-user/app 밑에 파일만 놓기
           strip_components: 2
 
+      # 🚀 최신 JAR → app.jar 로 교체 & 서비스 재시작
       - name: Rename JAR → app.jar & restart bouquet
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -63,25 +64,25 @@ jobs:
           script: |
             set -e
 
-            cd ${SPRING_TARGET_DIR}
+            cd /home/ec2-user/app
+            echo "[INFO] Current dir: $(pwd)"
 
-            echo "[INFO] JAR files in ${SPRING_TARGET_DIR}:"
+            echo "[INFO] JAR files in $(pwd):"
             ls -l *.jar || echo "No jar files found"
 
-            # 가장 최근 bootJar를 찾아서 app.jar로 변경
-            LATEST_JAR=$(ls -t *SNAPSHOT.jar | head -n 1 || true)
+            # 가장 최근 bootJar 찾기
+            LATEST_JAR=$(ls -t *SNAPSHOT.jar 2>/dev/null | head -n 1 || true)
 
             if [ -z "$LATEST_JAR" ]; then
-              echo "[ERROR] No *SNAPSHOT.jar file found in ${SPRING_TARGET_DIR}"
+              echo "[ERROR] No *SNAPSHOT.jar file found in $(pwd)"
               exit 1
             fi
 
             echo "[INFO] Using JAR: $LATEST_JAR → app.jar"
             mv "$LATEST_JAR" app.jar
 
-            # 서비스 재시작
             sudo systemctl daemon-reload
             sudo systemctl restart bouquet.service
 
-            # 상태 출력
+            echo "[INFO] bouquet.service status:"
             sudo systemctl status bouquet.service --no-pager
