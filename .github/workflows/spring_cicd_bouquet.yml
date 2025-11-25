@@ -4,9 +4,9 @@ on:
   push:
     branches: [ develop ]
     paths:
-      - 'src/**'
-      - 'build.gradle*'
-      - 'settings.gradle*'
+      - '**/src/**'
+      - '**/build.gradle*'
+      - '**/settings.gradle*'
       - '.github/workflows/spring_cicd_bouquet.yml'
   workflow_dispatch: {}
 
@@ -34,22 +34,25 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build with Gradle
+      # bootJar만 빌드해서 plain.jar 안 섞이게
+      - name: Build Spring Boot JAR (bootJar only)
         run: |
           chmod +x gradlew
-          ./gradlew clean build -x test --stacktrace
+          ./gradlew clean bootJar -x test --stacktrace
 
+      # bootJar만 EC2로 업로드 (끝이 SNAPSHOT.jar인 것만)
       - name: Upload JAR to EC2
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build/libs/*.jar"
+          source: "build/libs/*SNAPSHOT.jar"
           target: "${{ env.SPRING_TARGET_DIR }}/"
           overwrite: true
           timeout: "60s"
-          strip_components: 0
+          # build/libs 두 단계 경로를 떼고 바로 /app 아래에 파일만 떨어뜨림
+          strip_components: 2
 
       - name: Rename JAR → app.jar & restart bouquet
         uses: appleboy/ssh-action@v1.0.3
@@ -58,17 +61,27 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd /home/ec2-user/app
+            set -e
 
-            # 가장 최근 jar 파일을 app.jar로 교체
-            LATEST_JAR=$(ls -t *.jar | head -n 1)
+            cd ${SPRING_TARGET_DIR}
+
+            echo "[INFO] JAR files in ${SPRING_TARGET_DIR}:"
+            ls -l *.jar || echo "No jar files found"
+
+            # 가장 최근 bootJar를 찾아서 app.jar로 변경
+            LATEST_JAR=$(ls -t *SNAPSHOT.jar | head -n 1 || true)
+
             if [ -z "$LATEST_JAR" ]; then
-              echo "No JAR file found in /home/ec2-user/app"
+              echo "[ERROR] No *SNAPSHOT.jar file found in ${SPRING_TARGET_DIR}"
               exit 1
             fi
 
-            cp "$LATEST_JAR" app.jar
+            echo "[INFO] Using JAR: $LATEST_JAR → app.jar"
+            mv "$LATEST_JAR" app.jar
 
-            sudo systemctl stop bouquet.service || true
+            # 서비스 재시작
             sudo systemctl daemon-reload
-            sudo systemctl start bouquet.service
+            sudo systemctl restart bouquet.service
+
+            # 상태 출력
+            sudo systemctl status bouquet.service --no-pager
