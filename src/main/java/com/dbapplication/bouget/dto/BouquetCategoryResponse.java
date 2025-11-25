@@ -12,6 +12,8 @@ import lombok.NoArgsConstructor;
 @Builder
 public class BouquetCategoryResponse {
 
+    private Long id;
+    private Long bouquetId;
     private Season season;
     private DressMood dressMood;
     private DressSilhouette dressSilhouette;

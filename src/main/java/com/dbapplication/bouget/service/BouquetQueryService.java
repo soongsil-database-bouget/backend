@@ -54,7 +54,7 @@ public class BouquetQueryService {
             bouquetPage = bouquetRepository.findAll(pageable);
         }
 
-        // 엔티티 → DTO 매핑
+        // 엔티티 → DTO 매핑 (이제 각 BouquetResponse에 categories까지 포함)
         return bouquetPage.map(this::toBouquetResponse);
     }
 
@@ -85,17 +85,31 @@ public class BouquetQueryService {
 
     // ====== 매핑 메서드들 ======
 
+    /**
+     * 리스트/추천/virtual-fittings 등에서 사용할 BouquetResponse 생성
+     * - 부케 기본 정보 + categories 포함
+     */
     private BouquetResponse toBouquetResponse(Bouquet bouquet) {
+        List<BouquetCategory> categories = bouquetCategoryRepository.findByBouquet(bouquet);
+        List<BouquetCategoryResponse> categoryResponses = categories.stream()
+                .map(this::toCategoryResponse)
+                .toList();
+
         return BouquetResponse.builder()
                 .id(bouquet.getId())
                 .name(bouquet.getName())
                 .price(bouquet.getPrice())
+                .reason(bouquet.getReason())
+                .description(bouquet.getDescription())
                 .imageUrl(bouquet.getImageUrl())
+                .categories(categoryResponses)
                 .build();
     }
 
     private BouquetCategoryResponse toCategoryResponse(BouquetCategory category) {
         return BouquetCategoryResponse.builder()
+                .id(category.getId())
+                .bouquetId(category.getBouquet().getId())
                 .season(category.getSeason())
                 .dressMood(category.getDressMood())
                 .dressSilhouette(category.getDressSilhouette())

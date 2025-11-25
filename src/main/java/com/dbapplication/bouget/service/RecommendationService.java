@@ -1,12 +1,16 @@
 package com.dbapplication.bouget.service;
 
+import com.dbapplication.bouget.dto.BouquetCategoryResponse;
+import com.dbapplication.bouget.dto.BouquetResponse;
 import com.dbapplication.bouget.dto.RecommendationItemResponse;
 import com.dbapplication.bouget.dto.RecommendationSessionRequest;
 import com.dbapplication.bouget.dto.RecommendationSessionResponse;
 import com.dbapplication.bouget.entity.Bouquet;
+import com.dbapplication.bouget.entity.BouquetCategory;
 import com.dbapplication.bouget.entity.RecommendationItem;
 import com.dbapplication.bouget.entity.RecommendationSession;
 import com.dbapplication.bouget.entity.User;
+import com.dbapplication.bouget.repository.BouquetCategoryRepository;
 import com.dbapplication.bouget.repository.BouquetRepository;
 import com.dbapplication.bouget.repository.RecommendationItemRepository;
 import com.dbapplication.bouget.repository.RecommendationSessionRepository;
@@ -29,6 +33,7 @@ public class RecommendationService {
     private final RecommendationItemRepository itemRepository;
     private final BouquetRepository bouquetRepository;
     private final UserRepository userRepository;
+    private final BouquetCategoryRepository bouquetCategoryRepository; // ✅ 추가
 
     /**
      * 추천 세션 생성 + 추천 아이템 3개 저장
@@ -124,14 +129,47 @@ public class RecommendationService {
                 .build();
     }
 
+    /**
+     * RecommendationItem -> RecommendationItemResponse
+     * - bouquetName/Price/ImageUrl 대신 BouquetResponse + categories 로 내려줌
+     */
     private RecommendationItemResponse toItemResponse(RecommendationItem item) {
         Bouquet bouquet = item.getBouquet();
+
+        // 부케 카테고리 조회
+        List<BouquetCategory> categories = bouquetCategoryRepository.findByBouquet(bouquet);
+        List<BouquetCategoryResponse> categoryResponses = categories.stream()
+                .map(this::toCategoryResponse)
+                .toList();
+
+        // BouquetResponse 생성 (카테고리 포함)
+        BouquetResponse bouquetResponse = BouquetResponse.builder()
+                .id(bouquet.getId())
+                .name(bouquet.getName())
+                .price(bouquet.getPrice())
+                .reason(bouquet.getReason())
+                .description(bouquet.getDescription())
+                .imageUrl(bouquet.getImageUrl())
+                .categories(categoryResponses)
+                .build();
+
         return RecommendationItemResponse.builder()
                 .id(item.getId())
                 .bouquetId(bouquet.getId())
-                .bouquetName(bouquet.getName())
-                .bouquetPrice(bouquet.getPrice())
-                .bouquetImageUrl(bouquet.getImageUrl())
+                .bouquet(bouquetResponse)
+                .build();
+    }
+
+    private BouquetCategoryResponse toCategoryResponse(BouquetCategory category) {
+        return BouquetCategoryResponse.builder()
+                .id(category.getId())
+                .bouquetId(category.getBouquet().getId())
+                .season(category.getSeason())
+                .dressMood(category.getDressMood())
+                .dressSilhouette(category.getDressSilhouette())
+                .weddingColor(category.getWeddingColor())
+                .bouquetAtmosphere(category.getBouquetAtmosphere())
+                .usage(category.getUsage())
                 .build();
     }
 

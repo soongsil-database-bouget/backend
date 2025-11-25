@@ -12,5 +12,7 @@ public record ApplyImageResponse(
         String srcImageUrl,
         String genImageUrl,
         ApplyStatus status,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        BouquetResponse bouquet
 ) {}
+
