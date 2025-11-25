@@ -1,12 +1,16 @@
 package com.dbapplication.bouget.service;
 
 import com.dbapplication.bouget.dto.ApplyImageResponse;
+import com.dbapplication.bouget.dto.BouquetCategoryResponse;
+import com.dbapplication.bouget.dto.BouquetResponse;
 import com.dbapplication.bouget.entity.ApplyImage;
 import com.dbapplication.bouget.entity.Bouquet;
+import com.dbapplication.bouget.entity.BouquetCategory;
 import com.dbapplication.bouget.entity.RecommendationSession;
 import com.dbapplication.bouget.entity.User;
 import com.dbapplication.bouget.entity.enums.ApplyStatus;
 import com.dbapplication.bouget.repository.ApplyImageRepository;
+import com.dbapplication.bouget.repository.BouquetCategoryRepository;
 import com.dbapplication.bouget.repository.BouquetRepository;
 import com.dbapplication.bouget.repository.RecommendationSessionRepository;
 import com.dbapplication.bouget.repository.UserRepository;
@@ -31,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -42,6 +47,7 @@ public class ApplyImageService {
     private final BouquetRepository bouquetRepository;
     private final RecommendationSessionRepository sessionRepository;
     private final ApplyImageRepository applyImageRepository;
+    private final BouquetCategoryRepository bouquetCategoryRepository; // ✅ 추가
     private final WebClient fastapiWebClient;   // WebClientConfig 에서 fastapi용으로 등록한 Bean
 
     @Value("${file.upload-dir}")
@@ -107,6 +113,7 @@ public class ApplyImageService {
             throw new RuntimeException("이미지 처리 중 오류가 발생했습니다.", e);
         }
     }
+
     @Transactional(readOnly = true)
     public Page<ApplyImageResponse> getApplyImagesByUser(Long userId, Pageable pageable) {
         // 유저 검증 (존재하지 않는 유저 방지)
@@ -132,9 +139,6 @@ public class ApplyImageService {
 
     // === 내부 메서드들 ===
 
-    /**
-     * 유저가 업로드한 원본 이미지를 서버에 저장하고, 접근 가능한 URL을 반환
-     */
     private String saveUserSrcImage(MultipartFile userImageFile) throws IOException {
         String originalFilename = userImageFile.getOriginalFilename();
         String ext = getExtensionSafe(originalFilename);
@@ -146,17 +150,11 @@ public class ApplyImageService {
         Files.copy(userImageFile.getInputStream(), savePath, StandardCopyOption.REPLACE_EXISTING);
 
         // TODO: 실제 서빙 URL 패턴에 맞춰 수정
-        // 예: Nginx나 Spring static mapping 에 맞게 `/images/...` 같은 형태
         return "/images/apply/src/" + filename;
     }
 
-    /**
-     * Bouquet 엔티티에서 이미지 URL을 가져와서 byte[] 로 다운로드
-     * - Bouquet 엔티티의 필드 이름에 따라 아래의 getImageUrl() 부분 수정 필요
-     */
     private byte[] loadBouquetImageBytes(Bouquet bouquet) throws IOException {
-        // TODO: 실제 필드명에 맞게 수정. 예시로 imageUrl 사용
-        String bouquetImageUrl = bouquet.getImageUrl();  // <- 네 엔티티에 맞게 바꿔줘야 함
+        String bouquetImageUrl = bouquet.getImageUrl();
 
         if (bouquetImageUrl == null || bouquetImageUrl.isBlank()) {
             throw new IllegalStateException("Bouquet image URL is empty. bouquetId=" + bouquet.getId());
@@ -167,12 +165,6 @@ public class ApplyImageService {
         }
     }
 
-    /**
-     * FastAPI /api/composite-bouquet 호출
-     * - user_image: 업로드 이미지
-     * - bouquet_image: 부케 이미지 바이트
-     * - 결과: result_image_url (FastAPI에서 절대 URL로 반환하도록 수정해둔 상태)
-     */
     private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
         MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
 
@@ -211,9 +203,6 @@ public class ApplyImageService {
         return fastRes.result_image_url();
     }
 
-    /**
-     * FastAPI가 준 result_image_url 로부터 이미지를 다운로드해서 우리 서버에 저장
-     */
     private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
         String filename = UUID.randomUUID() + ".png";
         Path savePath = Paths.get(uploadDir, "apply", "gen", filename);
@@ -229,23 +218,57 @@ public class ApplyImageService {
 
     /**
      * ApplyImage -> ApplyImageResponse 매핑
+     * - BouquetResponse (카테고리 포함) 함께 내려줌
      */
     private ApplyImageResponse toResponse(ApplyImage entity) {
+        Bouquet bouquet = entity.getBouquet();
+
+        // 부케 + 카테고리 DTO 생성
+        BouquetResponse bouquetResponse = toBouquetResponse(bouquet);
+
         return new ApplyImageResponse(
                 entity.getId(),
                 entity.getUser().getId(),
-                entity.getBouquet().getId(),
+                bouquet.getId(),
                 entity.getSession() != null ? entity.getSession().getId() : null,
                 entity.getSrcImageUrl(),
                 entity.getGenImageUrl(),
                 entity.getStatus(),
-                entity.getCreatedAt()
+                entity.getCreatedAt(),
+                bouquetResponse
         );
     }
 
-    /**
-     * 파일명에서 확장자만 안전하게 추출 (예: "a.jpg" -> "jpg")
-     */
+    private BouquetResponse toBouquetResponse(Bouquet bouquet) {
+        List<BouquetCategory> categories = bouquetCategoryRepository.findByBouquet(bouquet);
+        List<BouquetCategoryResponse> categoryResponses = categories.stream()
+                .map(this::toCategoryResponse)
+                .toList();
+
+        return BouquetResponse.builder()
+                .id(bouquet.getId())
+                .name(bouquet.getName())
+                .price(bouquet.getPrice())
+                .reason(bouquet.getReason())
+                .description(bouquet.getDescription())
+                .imageUrl(bouquet.getImageUrl())
+                .categories(categoryResponses)
+                .build();
+    }
+
+    private BouquetCategoryResponse toCategoryResponse(BouquetCategory category) {
+        return BouquetCategoryResponse.builder()
+                .id(category.getId())
+                .bouquetId(category.getBouquet().getId())
+                .season(category.getSeason())
+                .dressMood(category.getDressMood())
+                .dressSilhouette(category.getDressSilhouette())
+                .weddingColor(category.getWeddingColor())
+                .bouquetAtmosphere(category.getBouquetAtmosphere())
+                .usage(category.getUsage())
+                .build();
+    }
+
     private String getExtensionSafe(String filename) {
         if (filename == null) return "";
         int idx = filename.lastIndexOf('.');
@@ -255,10 +278,6 @@ public class ApplyImageService {
         return filename.substring(idx + 1);
     }
 
-    /**
-     * FastAPI 응답 DTO
-     * - JSON 구조에 맞춰 snake_case 필드명 그대로 사용 (Jackson이 매핑함)
-     */
     private record FastApiCompositeResponse(
             String status,
             String original_user_file,
