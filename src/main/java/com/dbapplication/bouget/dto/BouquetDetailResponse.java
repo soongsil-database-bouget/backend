@@ -22,4 +22,6 @@ public class BouquetDetailResponse {
 
     // 이 부케에 연결된 카테고리들 (0개 이상)
     private List<BouquetCategoryResponse> categories;
+
+    private StoreResponse store;
 }

@@ -3,13 +3,16 @@ package com.dbapplication.bouget.service;
 import com.dbapplication.bouget.dto.BouquetCategoryResponse;
 import com.dbapplication.bouget.dto.BouquetDetailResponse;
 import com.dbapplication.bouget.dto.BouquetResponse;
+import com.dbapplication.bouget.dto.StoreResponse;
 import com.dbapplication.bouget.entity.Bouquet;
 import com.dbapplication.bouget.entity.BouquetCategory;
+import com.dbapplication.bouget.entity.Store;
 import com.dbapplication.bouget.entity.enums.BouquetAtmosphere;
 import com.dbapplication.bouget.entity.enums.Season;
 import com.dbapplication.bouget.entity.enums.Usage;
 import com.dbapplication.bouget.repository.BouquetCategoryRepository;
 import com.dbapplication.bouget.repository.BouquetRepository;
+import com.dbapplication.bouget.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -24,6 +27,7 @@ public class BouquetQueryService {
 
     private final BouquetRepository bouquetRepository;
     private final BouquetCategoryRepository bouquetCategoryRepository;
+    private final StoreRepository storeRepository;
 
     /**
      * 부케 리스트 조회 (전체 / 필터)
@@ -72,6 +76,13 @@ public class BouquetQueryService {
                 .map(this::toCategoryResponse)
                 .toList();
 
+        Store store = storeRepository.findByBouquet(bouquet);
+
+        StoreResponse storeResponse = null;
+        if (store != null) {
+            storeResponse = toStoreResponse(store);
+        }
+
         return BouquetDetailResponse.builder()
                 .id(bouquet.getId())
                 .name(bouquet.getName())
@@ -80,6 +91,7 @@ public class BouquetQueryService {
                 .description(bouquet.getDescription())
                 .imageUrl(bouquet.getImageUrl())
                 .categories(categoryResponses)
+                .store(storeResponse)
                 .build();
     }
 
@@ -118,4 +130,14 @@ public class BouquetQueryService {
                 .usage(category.getUsage())
                 .build();
     }
+    private StoreResponse toStoreResponse(Store store) {
+        return StoreResponse.builder()
+                .id(store.getId())
+                .bouquetId(store.getBouquet().getId())
+                .storeName(store.getStoreName())
+                .storeUrl(store.getStoreUrl())
+                .instagramId(store.getInstagramId())
+                .build();
+    }
+
 }
