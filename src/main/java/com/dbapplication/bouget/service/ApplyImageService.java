@@ -14,6 +14,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.stereotype.Service;
@@ -104,6 +106,18 @@ public class ApplyImageService {
             log.error("createApplyImage IOException", e);
             throw new RuntimeException("이미지 처리 중 오류가 발생했습니다.", e);
         }
+    }
+    @Transactional(readOnly = true)
+    public Page<ApplyImageResponse> getApplyImagesByUser(Long userId, Pageable pageable) {
+        // 유저 검증 (존재하지 않는 유저 방지)
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found. id=" + userId));
+
+        // 유저의 ApplyImage 페이지 조회
+        Page<ApplyImage> page = applyImageRepository.findByUser(user, pageable);
+
+        // 엔티티 → 응답 DTO 로 매핑
+        return page.map(this::toResponse);
     }
 
     /**
