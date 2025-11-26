@@ -38,11 +38,6 @@ public class KakaoAuthServiceImpl implements KakaoAuthService {
             throw new IllegalStateException("카카오 사용자 ID를 가져올 수 없습니다.");
         }
 
-        if (kakaoUserInfo.getEmail() == null) {
-            // DB 스키마상 email NOT NULL + UNIQUE 이므로 이메일 권한이 필수
-            throw new IllegalStateException("카카오 계정 이메일 권한이 필요합니다.");
-        }
-
         // 3) 우리 서비스 users 테이블 조회/생성
         boolean isNewUser = false;
         User user = userRepository
