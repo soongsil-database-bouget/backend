@@ -160,9 +160,9 @@ public class ApplyImageService {
             throw new IllegalStateException("Bouquet image URL is empty. bouquetId=" + bouquet.getId());
         }
 
-        try (InputStream in = new URL(bouquetImageUrl).openStream()) {
-            return in.readAllBytes();
-        }
+        String relative = bouquetImageUrl.substring("/images/".length()); // "bouquets/bouquet000.jpg"
+        Path path = Paths.get(uploadDir, relative);
+        return Files.readAllBytes(path);
     }
 
     private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
@@ -213,7 +213,7 @@ public class ApplyImageService {
         }
 
         // ★ 업로드 폴더 기준 상대 경로를 /images/** URL 로 반환
-        String relativePath = "apply/src/" + filename;           // 업로드 디렉터리 기준
+        String relativePath = "apply/gen/" + filename;           // 업로드 디렉터리 기준
         return "/images/" + relativePath.replace("\\", "/");      // 윈도우 대비 슬래시 통일
     }
 
