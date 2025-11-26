@@ -51,7 +51,7 @@ public class ApplyImageService {
     private final WebClient fastapiWebClient;   // WebClientConfig 에서 fastapi용으로 등록한 Bean
 
     @Value("${file.upload-dir}")
-    private String uploadDir; // 예: /var/www/bouget (실제 경로는 yml에서 설정)
+    private String uploadDir;
 
     /**
      * 이미지 적용 생성 플로우
@@ -146,11 +146,11 @@ public class ApplyImageService {
 
         Path savePath = Paths.get(uploadDir, "apply", "src", filename);
         Files.createDirectories(savePath.getParent());
-
         Files.copy(userImageFile.getInputStream(), savePath, StandardCopyOption.REPLACE_EXISTING);
 
-        // TODO: 실제 서빙 URL 패턴에 맞춰 수정
-        return "/images/apply/src/" + filename;
+        // ★ 업로드 폴더 기준 상대 경로를 /images/** URL 로 반환
+        String relativePath = "apply/src/" + filename;           // 업로드 디렉터리 기준
+        return "/images/" + relativePath.replace("\\", "/");      // 윈도우 대비 슬래시 통일
     }
 
     private byte[] loadBouquetImageBytes(Bouquet bouquet) throws IOException {
@@ -212,8 +212,9 @@ public class ApplyImageService {
             Files.copy(in, savePath, StandardCopyOption.REPLACE_EXISTING);
         }
 
-        // TODO: 실제 서빙 URL 패턴에 맞춰 수정
-        return "/images/apply/gen/" + filename;
+        // ★ 업로드 폴더 기준 상대 경로를 /images/** URL 로 반환
+        String relativePath = "apply/src/" + filename;           // 업로드 디렉터리 기준
+        return "/images/" + relativePath.replace("\\", "/");      // 윈도우 대비 슬래시 통일
     }
 
     /**

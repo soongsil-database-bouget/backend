@@ -9,4 +9,4 @@ fastapi:
   base-url: http://52.78.57.66:8000
 
 file:
-  upload-dir: /var/www/bouget
+  upload-dir: /home/ec2-user/app/uploads
