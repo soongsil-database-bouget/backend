@@ -12,7 +12,7 @@ public class WebClientConfig implements WebMvcConfigurer {
 
     @Value("${fastapi.base-url}")
     private String fastapiBaseUrl;
-    @Value("${app.upload-dir}")
+    @Value("${file.upload-dir}")
     private String uploadDir;
 
     @Bean
