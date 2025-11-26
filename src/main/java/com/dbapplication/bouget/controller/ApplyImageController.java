@@ -11,10 +11,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequiredArgsConstructor
@@ -50,10 +52,11 @@ public class ApplyImageController {
             @Parameter(description = "사용자 원본 이미지 파일", required = true)
             @RequestPart("user_image") MultipartFile userImage
     ) {
-        // 로그인 시 세션에 userId를 저장해두었다고 가정
-        Long userId = (Long) session.getAttribute("userId");
-        // TODO: userId가 null이면 401 Unauthorized 처리하는 예외 핸들링 추가 권장
 
+        Long userId = (Long) session.getAttribute("userId");
+        if (userId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
+        }
         ApplyImageResponse response = applyImageService.createApplyImage(
                 userId,
                 bouquetId,

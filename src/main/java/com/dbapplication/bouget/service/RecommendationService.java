@@ -15,12 +15,15 @@ import com.dbapplication.bouget.repository.BouquetRepository;
 import com.dbapplication.bouget.repository.RecommendationItemRepository;
 import com.dbapplication.bouget.repository.RecommendationSessionRepository;
 import com.dbapplication.bouget.repository.UserRepository;
+import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +43,7 @@ public class RecommendationService {
      */
     @Transactional
     public RecommendationSessionResponse createSession(RecommendationSessionRequest request) {
-        User user = getCurrentUser();  // TODO: 실제 로그인 유저 조회로 교체
+        User user = getCurrentUser();
 
         // 1. 추천 세션 생성
         RecommendationSession session = RecommendationSession.builder()
@@ -173,12 +176,29 @@ public class RecommendationService {
                 .build();
     }
 
-    // ================== 임시 로그인 유저 조회 ==================
+    // ================== 로그인 유저 조회 ==================
     private User getCurrentUser() {
-        // TODO: HttpSession, Spring Security 등으로 실제 로그인 유저 가져오도록 수정
-        Long dummyUserId = 1L;
-        return userRepository.findById(dummyUserId)
-                .orElseThrow(() -> new IllegalStateException("현재 로그인한 사용자를 찾을 수 없습니다. id=" + dummyUserId));
+        // 현재 쓰레드의 요청 정보 가져오기
+        ServletRequestAttributes attributes =
+                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+
+        if (attributes == null) {
+            throw new IllegalStateException("요청 컨텍스트가 없습니다. (HTTP 요청이 아닌 곳에서 호출됨)");
+        }
+
+        HttpSession session = attributes.getRequest().getSession(false);
+        if (session == null) {
+            throw new IllegalStateException("로그인 세션이 없습니다. (session == null)");
+        }
+
+        Long userId = (Long) session.getAttribute("userId");
+        if (userId == null) {
+            throw new IllegalStateException("세션에 userId가 없습니다. 로그인되지 않은 사용자입니다.");
+        }
+
+        return userRepository.findById(userId)
+                .orElseThrow(() ->
+                        new IllegalStateException("현재 로그인한 사용자를 찾을 수 없습니다. id=" + userId));
     }
 
     // ================== 임시 추천 알고리즘 ==================
