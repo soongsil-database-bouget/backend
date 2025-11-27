@@ -37,5 +37,5 @@ public interface BouquetCategoryRepository extends JpaRepository<BouquetCategory
     /**
      * 특정 부케에 연결된 카테고리 전부 조회 (상세 화면에서 사용)
      */
-    List<BouquetCategory> findByBouquet(Bouquet bouquet);
+    BouquetCategory findByBouquet(Bouquet bouquet);
 }

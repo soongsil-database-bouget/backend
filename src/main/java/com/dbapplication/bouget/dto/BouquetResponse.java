@@ -21,5 +21,5 @@ public class BouquetResponse {
     private String imageUrl;
 
     // 부케가 가진 카테고리들
-    private List<BouquetCategoryResponse> categories;
+    private BouquetCategoryResponse categories;
 }

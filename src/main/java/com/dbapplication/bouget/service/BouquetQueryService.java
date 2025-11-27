@@ -70,11 +70,9 @@ public class BouquetQueryService {
         Bouquet bouquet = bouquetRepository.findById(bouquetId)
                 .orElseThrow(() -> new IllegalArgumentException("Bouquet not found. id=" + bouquetId));
 
-        // 이 부케에 연결된 카테고리들
-        List<BouquetCategory> categories = bouquetCategoryRepository.findByBouquet(bouquet);
-        List<BouquetCategoryResponse> categoryResponses = categories.stream()
-                .map(this::toCategoryResponse)
-                .toList();
+        // 이 부케에 연결된 카테고리
+        BouquetCategory categories = bouquetCategoryRepository.findByBouquet(bouquet);
+        BouquetCategoryResponse categoryResponses = toCategoryResponse(categories);
 
         Store store = storeRepository.findByBouquet(bouquet);
 
@@ -102,10 +100,9 @@ public class BouquetQueryService {
      * - 부케 기본 정보 + categories 포함
      */
     private BouquetResponse toBouquetResponse(Bouquet bouquet) {
-        List<BouquetCategory> categories = bouquetCategoryRepository.findByBouquet(bouquet);
-        List<BouquetCategoryResponse> categoryResponses = categories.stream()
-                .map(this::toCategoryResponse)
-                .toList();
+        BouquetCategory categories = bouquetCategoryRepository.findByBouquet(bouquet);
+        BouquetCategoryResponse categoryResponses = toCategoryResponse(categories);
+
 
         return BouquetResponse.builder()
                 .id(bouquet.getId())
