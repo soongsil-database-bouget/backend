@@ -36,14 +36,6 @@ public class RecommendationItem {
     @JoinColumn(name = "bouquet_id", nullable = false)
     private Bouquet bouquet;
 
-    /**
-     * JSON 컬럼
-     * 예: {"matchingKeywords":["SPRING","PASTEL"],"score":0.92}
-     * 우선 String으로 매핑해두고, 나중에 ValueObject나 Converter로 분리 가능
-     */
-    @Column(columnDefinition = "json")
-    private String reason;
-
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

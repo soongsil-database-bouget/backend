@@ -22,22 +22,26 @@ public class BouquetCategory {
     private Bouquet bouquet;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column
     private Season season;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "dress_mood", nullable = false)
+    @Column(name = "dress_mood")
     private DressMood dressMood;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "dress_silhouette", nullable = false)
+    @Column(name = "dress_silhouette")
     private DressSilhouette dressSilhouette;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "wedding_color", nullable = false)
+    @Column(name = "wedding_color")
     private WeddingColor weddingColor;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "bouquet_atmosphere", nullable = false)
+    @Column(name = "bouquet_atmosphere")
     private BouquetAtmosphere bouquetAtmosphere;
+
+    @Enumerated(EnumType.STRING)
+    @Column
+    private Usage usage;
 }
