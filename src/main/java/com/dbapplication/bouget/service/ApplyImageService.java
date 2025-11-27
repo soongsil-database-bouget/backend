@@ -241,10 +241,8 @@ public class ApplyImageService {
     }
 
     private BouquetResponse toBouquetResponse(Bouquet bouquet) {
-        List<BouquetCategory> categories = bouquetCategoryRepository.findByBouquet(bouquet);
-        List<BouquetCategoryResponse> categoryResponses = categories.stream()
-                .map(this::toCategoryResponse)
-                .toList();
+        BouquetCategory categories = bouquetCategoryRepository.findByBouquet(bouquet);
+        BouquetCategoryResponse categoryResponses = toCategoryResponse(categories);
 
         return BouquetResponse.builder()
                 .id(bouquet.getId())
