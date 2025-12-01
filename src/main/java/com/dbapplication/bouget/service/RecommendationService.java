@@ -15,7 +15,7 @@ import com.dbapplication.bouget.repository.BouquetRepository;
 import com.dbapplication.bouget.repository.RecommendationItemRepository;
 import com.dbapplication.bouget.repository.RecommendationSessionRepository;
 import com.dbapplication.bouget.repository.UserRepository;
-import jakarta.servlet.http.HttpSession;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -23,8 +23,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,6 +39,7 @@ public class RecommendationService {
     private final BouquetRepository bouquetRepository;
     private final UserRepository userRepository;
     private final BouquetCategoryRepository bouquetCategoryRepository;
+    private final AuthService authService;
 
     // 가중치 상수
     private static final int WEIGHT_ATMOSPHERE      = 10;
@@ -188,27 +187,7 @@ public class RecommendationService {
 
     // ================== 로그인 유저 조회 ==================
     private User getCurrentUser() {
-        // 현재 쓰레드의 요청 정보 가져오기
-        ServletRequestAttributes attributes =
-                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-
-        if (attributes == null) {
-            throw new IllegalStateException("요청 컨텍스트가 없습니다. (HTTP 요청이 아닌 곳에서 호출됨)");
-        }
-
-        HttpSession session = attributes.getRequest().getSession(false);
-        if (session == null) {
-            throw new IllegalStateException("로그인 세션이 없습니다. (session == null)");
-        }
-
-        Long userId = (Long) session.getAttribute("userId");
-        if (userId == null) {
-            throw new IllegalStateException("세션에 userId가 없습니다. 로그인되지 않은 사용자입니다.");
-        }
-
-        return userRepository.findById(userId)
-                .orElseThrow(() ->
-                        new IllegalStateException("현재 로그인한 사용자를 찾을 수 없습니다. id=" + userId));
+        return authService.getCurrentUser();
     }
 
     // ================== 추천 알고리즘 ==================

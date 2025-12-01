@@ -2,7 +2,9 @@ package com.dbapplication.bouget.controller;
 
 import com.dbapplication.bouget.dto.KakaoLoginRequest;
 import com.dbapplication.bouget.dto.KakaoLoginResponse;
+import com.dbapplication.bouget.service.AuthService;
 import com.dbapplication.bouget.service.KakaoAuthService;
+import com.dbapplication.bouget.service.TokenService;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -15,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final KakaoAuthService kakaoAuthService;
+    private final AuthService authService;
+    private final TokenService tokenService;
 
     /**
      * 카카오 로그인 & 회원가입
@@ -23,32 +27,23 @@ public class AuthController {
      */
     @PostMapping("/kakao/login")
     public ResponseEntity<KakaoLoginResponse> kakaoLogin(
-            @RequestBody KakaoLoginRequest request,
-            HttpSession session
+            @RequestBody KakaoLoginRequest request
     ) {
         if (!StringUtils.hasText(request.authorizationCode())
                 || !StringUtils.hasText(request.redirectUri())) {
             throw new IllegalArgumentException("authorizationCode와 redirectUri는 필수입니다.");
         }
-
         KakaoLoginResponse response = kakaoAuthService.login(request);
-
-        // 세션에 기본 정보 저장 (필요한 것만)
-        session.setAttribute("userId", response.userId());
-        session.setAttribute("userEmail", response.email());
-        session.setAttribute("userName", response.name());
-        session.setAttribute("profileImageUrl", response.profileImageUrl());
-
         return ResponseEntity.ok(response);
     }
 
     /**
      * 로그아웃
-     * - 세션 무효화
-     */
-    @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpSession session) {
-        session.invalidate();
-        return ResponseEntity.noContent().build();
-    }
+     * **/
+     @PostMapping("/logout")
+     public ResponseEntity<Void> logout() {
+     String token = authService.getCurrentToken(); // 토큰 없으면 401 던짐
+     tokenService.revokeToken(token);             // DB에서 api_token 제거
+     return ResponseEntity.noContent().build();   // 204
+     }
 }
