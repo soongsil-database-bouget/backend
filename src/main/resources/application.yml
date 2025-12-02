@@ -6,7 +6,7 @@ kakao:
     user-info-uri: https://kapi.kakao.com/v2/user/me
 
 fastapi:
-  base-url: http://52.78.57.66:8000
+  base-url: http://52.78.57.66:8001
 
 app:
   server-base-url: http://52.78.57.66:8080
