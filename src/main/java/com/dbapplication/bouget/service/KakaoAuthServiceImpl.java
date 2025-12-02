@@ -19,6 +19,7 @@ public class KakaoAuthServiceImpl implements KakaoAuthService {
 
     private final KakaoOAuthClient kakaoOAuthClient;
     private final UserRepository userRepository;
+    private final TokenService tokenService;
 
     @Override
     public KakaoLoginResponse login(KakaoLoginRequest request) {
@@ -59,12 +60,16 @@ public class KakaoAuthServiceImpl implements KakaoAuthService {
             user.updateProfile(kakaoUserInfo.getNickname(), kakaoUserInfo.getEmail());
         }
 
-        // 4) 응답 DTO 반환 (서비스용 토큰은 없음)
+        // 4) 세션 대신 토큰 발급
+        String token = tokenService.issueTokenForUser(user);
+
+        // 5) 응답 DTO 반환 (서비스용 토큰은 없음)
         return new KakaoLoginResponse(
                 user.getId(),
                 user.getEmail(),
                 user.getName(),
                 kakaoUserInfo.getProfileImageUrl(),
+                token,
                 isNewUser
         );
     }

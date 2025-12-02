@@ -4,6 +4,7 @@ package com.dbapplication.bouget.controller;
 import com.dbapplication.bouget.dto.InquiryCreateRequest;
 import com.dbapplication.bouget.dto.InquiryListResponse;
 import com.dbapplication.bouget.dto.InquiryResponse;
+import com.dbapplication.bouget.service.AuthService;
 import com.dbapplication.bouget.service.InquiryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 public class InquiryController {
 
     private final InquiryService inquiryService;
+    private final AuthService authService;
 
     /**
      * POST /inquiries
@@ -36,10 +38,9 @@ public class InquiryController {
             description = "현재 로그인한 사용자의 문의를 등록합니다."
     )
     public ResponseEntity<InquiryResponse> createInquiry(
-            HttpSession session,
             @RequestBody @Valid InquiryCreateRequest request
     ) {
-        Long userId = (Long) session.getAttribute("userId");
+        Long userId = authService.getCurrentUser().getId();
         // TODO: userId가 null이면 401 Unauthorized 처리 (전역 예외 처리에서)
 
         InquiryResponse response = inquiryService.createInquiry(userId, request);
@@ -62,7 +63,6 @@ public class InquiryController {
             description = "현재 로그인한 사용자가 작성한 문의 목록을 조회합니다."
     )
     public ResponseEntity<InquiryListResponse> getMyInquiries(
-            HttpSession session,
 
             @Parameter(description = "페이지 번호 (1부터 시작)", example = "1")
             @RequestParam(name = "page", defaultValue = "1") int page,
@@ -70,7 +70,7 @@ public class InquiryController {
             @Parameter(description = "페이지 크기", example = "20")
             @RequestParam(name = "size", defaultValue = "20") int size
     ) {
-        Long userId = (Long) session.getAttribute("userId");
+        Long userId = authService.getCurrentUser().getId();
         // TODO: userId null 시 401 처리
 
         int safePage = Math.max(page, 1);

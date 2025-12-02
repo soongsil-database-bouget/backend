@@ -11,7 +11,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // 카카오 로그인용 (provider + sub)
     Optional<User> findByOauthProviderAndOauthSub(String oauthProvider, String oauthSub);
-
+    Optional<User> findByApiToken(String apiToken);  // ★ 추가
     // 필요시 사용
     Optional<User> findByEmail(String email);
 }
