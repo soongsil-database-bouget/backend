@@ -8,5 +8,9 @@ kakao:
 fastapi:
   base-url: http://52.78.57.66:8000
 
+app:
+  server-base-url: http://52.78.57.66:8080
+
+
 file:
   upload-dir: /home/ec2-user/app/uploads

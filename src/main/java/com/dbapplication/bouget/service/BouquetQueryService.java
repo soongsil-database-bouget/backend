@@ -14,12 +14,11 @@ import com.dbapplication.bouget.repository.BouquetCategoryRepository;
 import com.dbapplication.bouget.repository.BouquetRepository;
 import com.dbapplication.bouget.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +27,10 @@ public class BouquetQueryService {
     private final BouquetRepository bouquetRepository;
     private final BouquetCategoryRepository bouquetCategoryRepository;
     private final StoreRepository storeRepository;
+
+    // ★ 추가: 서버 베이스 URL
+    @Value("${app.server-base-url}")
+    private String serverBaseUrl;
 
     /**
      * 부케 리스트 조회 (전체 / 필터)
@@ -81,13 +84,16 @@ public class BouquetQueryService {
             storeResponse = toStoreResponse(store);
         }
 
+        // ★ imageUrl 을 풀 URL 로 변환
+        String bouquetImageFullUrl = buildFullImageUrl(bouquet.getImageUrl());
+
         return BouquetDetailResponse.builder()
                 .id(bouquet.getId())
                 .name(bouquet.getName())
                 .price(bouquet.getPrice())
                 .reason(bouquet.getReason())
                 .description(bouquet.getDescription())
-                .imageUrl(bouquet.getImageUrl())
+                .imageUrl(bouquetImageFullUrl)
                 .categories(categoryResponses)
                 .store(storeResponse)
                 .build();
@@ -103,6 +109,8 @@ public class BouquetQueryService {
         BouquetCategory categories = bouquetCategoryRepository.findByBouquet(bouquet);
         BouquetCategoryResponse categoryResponses = toCategoryResponse(categories);
 
+        // ★ 리스트 응답에도 풀 URL
+        String bouquetImageFullUrl = buildFullImageUrl(bouquet.getImageUrl());
 
         return BouquetResponse.builder()
                 .id(bouquet.getId())
@@ -110,7 +118,7 @@ public class BouquetQueryService {
                 .price(bouquet.getPrice())
                 .reason(bouquet.getReason())
                 .description(bouquet.getDescription())
-                .imageUrl(bouquet.getImageUrl())
+                .imageUrl(bouquetImageFullUrl)
                 .categories(categoryResponses)
                 .build();
     }
@@ -127,6 +135,7 @@ public class BouquetQueryService {
                 .usage(category.getUsage())
                 .build();
     }
+
     private StoreResponse toStoreResponse(Store store) {
         return StoreResponse.builder()
                 .id(store.getId())
@@ -137,4 +146,22 @@ public class BouquetQueryService {
                 .build();
     }
 
+    // ★ /images/... 또는 http... 를 풀 URL로 통일하는 함수
+    private String buildFullImageUrl(String path) {
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+
+        // 이미 절대 URL이면 그대로 사용
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            return path;
+        }
+
+        String resultPath = path;
+        if (!resultPath.startsWith("/")) {
+            resultPath = "/" + resultPath;
+        }
+
+        return serverBaseUrl + resultPath;
+    }
 }
