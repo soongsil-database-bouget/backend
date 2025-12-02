@@ -205,7 +205,7 @@ public class ApplyImageService {
     private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
         MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
 
-        // 1) user_image
+        // user_image
         String userFilename = userImageFile.getOriginalFilename();
         MediaType userMediaType = resolveImageMediaType(userFilename, userImageFile.getContentType());
 
@@ -213,24 +213,38 @@ public class ApplyImageService {
                 .filename(userFilename)
                 .contentType(userMediaType);
 
-        // 2) bouquet_image
+        // bouquet_image
         ByteArrayResource bouquetResource = new ByteArrayResource(bouquetImageBytes) {
             @Override
             public String getFilename() {
-                return "bouquet.png"; // 실제 확장자에 맞게
+                return "bouquet.png";
             }
         };
 
         bodyBuilder.part("bouquet_image", bouquetResource)
                 .filename("bouquet.png")
-                .contentType(MediaType.IMAGE_PNG);   // ★ PNG로 명시
+                .contentType(MediaType.IMAGE_PNG);  // PNG로 고정
 
         FastApiCompositeResponse fastRes = fastapiWebClient.post()
                 .uri("/api/composite-bouquet")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
-                .retrieve()
-                .bodyToMono(FastApiCompositeResponse.class)
+                .exchangeToMono(response -> {
+                    if (response.statusCode().is2xxSuccessful()) {
+                        return response.bodyToMono(FastApiCompositeResponse.class);
+                    } else {
+                        return response.bodyToMono(String.class)
+                                .defaultIfEmpty("")
+                                .flatMap(errorBody -> {
+                                    log.error("[FastAPI ERROR] status={}, body={}",
+                                            response.statusCode(), errorBody);
+                                    return reactor.core.publisher.Mono.error(
+                                            new RuntimeException("FastAPI error: " + response.statusCode()
+                                                    + " body=" + errorBody)
+                                    );
+                                });
+                    }
+                })
                 .block();
 
         if (fastRes == null || fastRes.result_image_url() == null || fastRes.result_image_url().isBlank()) {
@@ -240,6 +254,24 @@ public class ApplyImageService {
         log.info("FastAPI composite result url = {}", fastRes.result_image_url());
         return fastRes.result_image_url();
     }
+
+    private MediaType resolveImageMediaType(String filename, String contentType) {
+        if (contentType != null && !contentType.isBlank()) {
+            return MediaType.parseMediaType(contentType);
+        }
+
+        if (filename != null) {
+            String lower = filename.toLowerCase();
+            if (lower.endsWith(".png")) {
+                return MediaType.IMAGE_PNG;
+            } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+                return MediaType.IMAGE_JPEG;
+            }
+        }
+
+        return MediaType.IMAGE_PNG;
+    }
+
 
 
     private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
