@@ -184,28 +184,46 @@ public class ApplyImageService {
         Path path = Paths.get(uploadDir, relative);
         return Files.readAllBytes(path);
     }
+    private MediaType resolveImageMediaType(String filename, String contentType) {
+        if (contentType != null && !contentType.isBlank()) {
+            return MediaType.parseMediaType(contentType);
+        }
+
+        if (filename != null) {
+            String lower = filename.toLowerCase();
+            if (lower.endsWith(".png")) {
+                return MediaType.IMAGE_PNG;
+            } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+                return MediaType.IMAGE_JPEG;
+            }
+        }
+
+        // 그래도 모르겠으면 PNG 하나로 통일해도 됨
+        return MediaType.IMAGE_PNG;
+    }
 
     private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
         MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
 
-        // user_image
-        bodyBuilder.part("user_image", userImageFile.getResource())
-                .filename(userImageFile.getOriginalFilename())
-                .contentType(userImageFile.getContentType() == null
-                        ? MediaType.IMAGE_JPEG
-                        : MediaType.parseMediaType(userImageFile.getContentType()));
+        // 1) user_image
+        String userFilename = userImageFile.getOriginalFilename();
+        MediaType userMediaType = resolveImageMediaType(userFilename, userImageFile.getContentType());
 
-        // bouquet_image
+        bodyBuilder.part("user_image", userImageFile.getResource())
+                .filename(userFilename)
+                .contentType(userMediaType);
+
+        // 2) bouquet_image
         ByteArrayResource bouquetResource = new ByteArrayResource(bouquetImageBytes) {
             @Override
             public String getFilename() {
-                return "bouquet.png";
+                return "bouquet.png"; // 실제 확장자에 맞게
             }
         };
 
         bodyBuilder.part("bouquet_image", bouquetResource)
                 .filename("bouquet.png")
-                .contentType(MediaType.IMAGE_JPEG);
+                .contentType(MediaType.IMAGE_PNG);   // ★ PNG로 명시
 
         FastApiCompositeResponse fastRes = fastapiWebClient.post()
                 .uri("/api/composite-bouquet")
@@ -222,6 +240,7 @@ public class ApplyImageService {
         log.info("FastAPI composite result url = {}", fastRes.result_image_url());
         return fastRes.result_image_url();
     }
+
 
     private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
         String filename = UUID.randomUUID() + ".png";
