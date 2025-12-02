@@ -13,7 +13,7 @@ public class CorsConfig implements WebMvcConfigurer {
         registry.addMapping("/**")
                 .allowedOrigins(
                         "http://localhost:5173",      // Vite 로컬 프론트
-                        "http://52.78.57.66:5173"     // 나중에 프론트 올리면 여기도 추가
+                        "https://buquetin.netlify.app/"
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
