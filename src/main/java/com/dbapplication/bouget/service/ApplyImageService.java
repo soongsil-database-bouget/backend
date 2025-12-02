@@ -255,24 +255,6 @@ public class ApplyImageService {
         return fastRes.result_image_url();
     }
 
-    private MediaType resolveImageMediaType(String filename, String contentType) {
-        if (contentType != null && !contentType.isBlank()) {
-            return MediaType.parseMediaType(contentType);
-        }
-
-        if (filename != null) {
-            String lower = filename.toLowerCase();
-            if (lower.endsWith(".png")) {
-                return MediaType.IMAGE_PNG;
-            } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-                return MediaType.IMAGE_JPEG;
-            }
-        }
-
-        return MediaType.IMAGE_PNG;
-    }
-
-
 
     private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
         String filename = UUID.randomUUID() + ".png";
