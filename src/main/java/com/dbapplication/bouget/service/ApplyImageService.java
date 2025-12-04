@@ -102,8 +102,8 @@ public class ApplyImageService {
 
             ApplyImage saved = applyImageRepository.save(applyImage);
 
-            // 4. 비동기로 합성 작업 시작 (MultipartFile 그대로 넘김)
-            startCompositeAsync(saved.getId(), bouquet.getId(), userImageFile);
+            // 4. 비동기로 합성 작업 시작
+            startCompositeAsync(saved.getId(), bouquet.getId(), srcImageUrl);
 
             // 5. 바로 응답 (status = PENDING, genImageUrl = null로 내려감)
             return toResponse(saved);
@@ -113,28 +113,32 @@ public class ApplyImageService {
             throw new RuntimeException("이미지 처리 중 오류가 발생했습니다.", e);
         }
     }
-    private void startCompositeAsync(Long applyImageId, Long bouquetId, MultipartFile userImageFile) {
+    private void startCompositeAsync(Long applyImageId, Long bouquetId, String srcImageUrl) {
         CompletableFuture.runAsync(() -> {
             try {
                 log.info("Async composite start. applyImageId={}, bouquetId={}", applyImageId, bouquetId);
 
-                // 1) ApplyImage, Bouquet 다시 조회 (repository가 자체 @Transactional 달고 있음)
                 ApplyImage applyImage = applyImageRepository.findById(applyImageId)
                         .orElseThrow(() -> new IllegalArgumentException("ApplyImage not found. id=" + applyImageId));
 
                 Bouquet bouquet = bouquetRepository.findById(bouquetId)
                         .orElseThrow(() -> new IllegalArgumentException("Bouquet not found. id=" + bouquetId));
 
-                // 2) 부케 이미지 바이트 로딩 (기존 메서드 그대로 사용)
+                // 1) 유저 이미지: 우리가 저장해둔 파일에서 다시 읽기
+                byte[] userImageBytes = loadSrcImageBytes(applyImage.getSrcImageUrl());
+                String userFilename = extractFilenameFromImageUrl(applyImage.getSrcImageUrl());
+
+                // 2) 부케 이미지: 기존 방식 그대로
                 byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
-                log.info("부케이미지 바이트 로딩 성공");
-                // 3) FastAPI 호출 (시그니처 그대로: MultipartFile + byte[])
-                String resultImageUrlFromFastApi = callFastApiComposite(userImageFile, bouquetBytes);
-                log.info("fastAPI 호출 성공");
-                // 4) 결과 이미지 다운로드 → 우리 서버에 저장
+
+                // 3) FastAPI 호출 (이제 MultipartFile 말고 byte[] 기반)
+                String resultImageUrlFromFastApi =
+                        callFastApiComposite(userImageBytes, userFilename, bouquetBytes);
+
+                // 4) 결과 이미지 저장
                 String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi);
 
-                // 5) 상태 DONE + genImageUrl 업데이트
+                // 5) 상태 DONE 처리
                 applyImage.markDone(genImageUrl);
                 applyImageRepository.save(applyImage);
 
@@ -142,7 +146,6 @@ public class ApplyImageService {
 
             } catch (Exception e) {
                 log.error("Async composite failed. applyImageId=" + applyImageId, e);
-                // 실패 시 상태 FAILED만 찍어 둔다
                 try {
                     applyImageRepository.findById(applyImageId).ifPresent(ai -> {
                         ai.markFailed();
@@ -154,6 +157,7 @@ public class ApplyImageService {
             }
         });
     }
+
 
     @Transactional(readOnly = true)
     public Page<ApplyImageResponse> getApplyImagesByUser(Long userId, Pageable pageable) {
@@ -238,19 +242,69 @@ public class ApplyImageService {
         // 그래도 모르겠으면 PNG 하나로 통일해도 됨
         return MediaType.IMAGE_PNG;
     }
+    private byte[] loadSrcImageBytes(String srcImageUrl) throws IOException {
+        if (srcImageUrl == null || srcImageUrl.isBlank()) {
+            throw new IllegalStateException("srcImageUrl is empty");
+        }
 
-    private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
+        String pathPart = srcImageUrl;
+
+        // 절대 URL로 들어올 수도 있으니 /images/부터 잘라냄
+        if (pathPart.startsWith("http://") || pathPart.startsWith("https://")) {
+            int idx = pathPart.indexOf("/images/");
+            if (idx == -1) {
+                throw new IllegalStateException("srcImageUrl must contain /images/. url=" + srcImageUrl);
+            }
+            pathPart = pathPart.substring(idx); // "/images/..."
+        }
+
+        if (!pathPart.startsWith("/images/")) {
+            throw new IllegalStateException("srcImageUrl must start with /images/. url=" + srcImageUrl);
+        }
+
+        String relative = pathPart.substring("/images/".length()); // "apply/src/xxxx.png"
+        Path path = Paths.get(uploadDir, relative);
+        return Files.readAllBytes(path);
+    }
+
+    private String extractFilenameFromImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return "user.png";
+        }
+        int idx = imageUrl.lastIndexOf('/');
+        if (idx >= 0 && idx < imageUrl.length() - 1) {
+            return imageUrl.substring(idx + 1);
+        }
+        return "user.png";
+    }
+
+    private String callFastApiComposite(
+            byte[] userImageBytes,
+            String userFilename,
+            byte[] bouquetImageBytes
+    ) {
         MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
 
-        // user_image
-        String userFilename = userImageFile.getOriginalFilename();
-        MediaType userMediaType = resolveImageMediaType(userFilename, userImageFile.getContentType());
+        if (userFilename == null || userFilename.isBlank()) {
+            userFilename = "user.png";
+        }
 
-        bodyBuilder.part("user_image", userImageFile.getResource())
+        MediaType userMediaType = resolveImageMediaType(userFilename, null);
+
+        // user_image
+        String finalUserFilename = userFilename;
+        ByteArrayResource userResource = new ByteArrayResource(userImageBytes) {
+            @Override
+            public String getFilename() {
+                return finalUserFilename;
+            }
+        };
+
+        bodyBuilder.part("user_image", userResource)
                 .filename(userFilename)
                 .contentType(userMediaType);
 
-        // bouquet_image
+        // bouquet_image (기존이랑 동일)
         ByteArrayResource bouquetResource = new ByteArrayResource(bouquetImageBytes) {
             @Override
             public String getFilename() {
@@ -260,7 +314,7 @@ public class ApplyImageService {
 
         bodyBuilder.part("bouquet_image", bouquetResource)
                 .filename("bouquet.png")
-                .contentType(MediaType.IMAGE_PNG);  // PNG로 고정
+                .contentType(MediaType.IMAGE_PNG);
 
         FastApiCompositeResponse fastRes = fastapiWebClient.post()
                 .uri("/api/composite-bouquet")
@@ -291,6 +345,7 @@ public class ApplyImageService {
         log.info("FastAPI composite result url = {}", fastRes.result_image_url());
         return fastRes.result_image_url();
     }
+
 
 
     private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
