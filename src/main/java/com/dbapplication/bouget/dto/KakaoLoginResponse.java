@@ -5,7 +5,7 @@ public record KakaoLoginResponse(
         String email,
         String name,
         String profileImageUrl,
-
+        String token,   // ★ Bearer 토큰
         boolean isNewUser
 ) {
 }

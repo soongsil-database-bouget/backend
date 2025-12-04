@@ -47,11 +47,15 @@ public class ApplyImageService {
     private final BouquetRepository bouquetRepository;
     private final RecommendationSessionRepository sessionRepository;
     private final ApplyImageRepository applyImageRepository;
-    private final BouquetCategoryRepository bouquetCategoryRepository; // ✅ 추가
-    private final WebClient fastapiWebClient;   // WebClientConfig 에서 fastapi용으로 등록한 Bean
+    private final BouquetCategoryRepository bouquetCategoryRepository;
+    private final WebClient fastapiWebClient;
 
     @Value("${file.upload-dir}")
     private String uploadDir;
+
+    // ★ 추가: 서버 베이스 URL (예: http://52.78.57.66:8080)
+    @Value("${app.server-base-url}")
+    private String serverBaseUrl;
 
     /**
      * 이미지 적용 생성 플로우
@@ -84,7 +88,7 @@ public class ApplyImageService {
 
         try {
             // 2. 유저 원본 이미지 서버에 저장
-            String srcImageUrl = saveUserSrcImage(userImageFile);
+            String srcImageUrl = saveUserSrcImage(userImageFile);   // "/images/apply/src/xxxx.png"
 
             // 3. 부케 이미지 바이트 가져오기
             byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
@@ -93,7 +97,7 @@ public class ApplyImageService {
             String resultImageUrlFromFastApi = callFastApiComposite(userImageFile, bouquetBytes);
 
             // 5. 결과 이미지 다운로드해서 우리 서버에 저장
-            String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi);
+            String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi); // "/images/apply/gen/xxxx.png"
 
             // 6. ApplyImage 엔티티 저장
             ApplyImage applyImage = ApplyImage.builder()
@@ -148,9 +152,9 @@ public class ApplyImageService {
         Files.createDirectories(savePath.getParent());
         Files.copy(userImageFile.getInputStream(), savePath, StandardCopyOption.REPLACE_EXISTING);
 
-        // ★ 업로드 폴더 기준 상대 경로를 /images/** URL 로 반환
-        String relativePath = "apply/src/" + filename;           // 업로드 디렉터리 기준
-        return "/images/" + relativePath.replace("\\", "/");      // 윈도우 대비 슬래시 통일
+        // 업로드 폴더 기준 상대 경로를 /images/** URL 로 반환 (DB에는 이 값 저장)
+        String relativePath = "apply/src/" + filename;
+        return "/images/" + relativePath.replace("\\", "/");
     }
 
     private byte[] loadBouquetImageBytes(Bouquet bouquet) throws IOException {
@@ -160,39 +164,87 @@ public class ApplyImageService {
             throw new IllegalStateException("Bouquet image URL is empty. bouquetId=" + bouquet.getId());
         }
 
-        String relative = bouquetImageUrl.substring("/images/".length()); // "bouquets/bouquet000.jpg"
+        // ★ 여기서 '/images/...' 또는 'http://.../images/...' 둘 다 처리
+        String pathPart = bouquetImageUrl;
+
+        // 절대 URL로 저장되어 있다면 '/images/...' 부분만 추출
+        if (pathPart.startsWith("http://") || pathPart.startsWith("https://")) {
+            int idx = pathPart.indexOf("/images/");
+            if (idx == -1) {
+                throw new IllegalStateException("Bouquet image URL must contain /images/. url=" + bouquetImageUrl);
+            }
+            pathPart = pathPart.substring(idx); // "/images/..."
+        }
+
+        if (!pathPart.startsWith("/images/")) {
+            throw new IllegalStateException("Bouquet image URL must start with /images/. url=" + bouquetImageUrl);
+        }
+
+        String relative = pathPart.substring("/images/".length()); // "bouquets/bouquet000.png"
         Path path = Paths.get(uploadDir, relative);
         return Files.readAllBytes(path);
+    }
+    private MediaType resolveImageMediaType(String filename, String contentType) {
+        if (contentType != null && !contentType.isBlank()) {
+            return MediaType.parseMediaType(contentType);
+        }
+
+        if (filename != null) {
+            String lower = filename.toLowerCase();
+            if (lower.endsWith(".png")) {
+                return MediaType.IMAGE_PNG;
+            } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+                return MediaType.IMAGE_JPEG;
+            }
+        }
+
+        // 그래도 모르겠으면 PNG 하나로 통일해도 됨
+        return MediaType.IMAGE_PNG;
     }
 
     private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
         MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
 
         // user_image
+        String userFilename = userImageFile.getOriginalFilename();
+        MediaType userMediaType = resolveImageMediaType(userFilename, userImageFile.getContentType());
+
         bodyBuilder.part("user_image", userImageFile.getResource())
-                .filename(userImageFile.getOriginalFilename())
-                .contentType(userImageFile.getContentType() == null
-                        ? MediaType.IMAGE_JPEG
-                        : MediaType.parseMediaType(userImageFile.getContentType()));
+                .filename(userFilename)
+                .contentType(userMediaType);
 
         // bouquet_image
         ByteArrayResource bouquetResource = new ByteArrayResource(bouquetImageBytes) {
             @Override
             public String getFilename() {
-                return "bouquet.jpg";
+                return "bouquet.png";
             }
         };
 
         bodyBuilder.part("bouquet_image", bouquetResource)
-                .filename("bouquet.jpg")
-                .contentType(MediaType.IMAGE_JPEG);
+                .filename("bouquet.png")
+                .contentType(MediaType.IMAGE_PNG);  // PNG로 고정
 
         FastApiCompositeResponse fastRes = fastapiWebClient.post()
                 .uri("/api/composite-bouquet")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
-                .retrieve()
-                .bodyToMono(FastApiCompositeResponse.class)
+                .exchangeToMono(response -> {
+                    if (response.statusCode().is2xxSuccessful()) {
+                        return response.bodyToMono(FastApiCompositeResponse.class);
+                    } else {
+                        return response.bodyToMono(String.class)
+                                .defaultIfEmpty("")
+                                .flatMap(errorBody -> {
+                                    log.error("[FastAPI ERROR] status={}, body={}",
+                                            response.statusCode(), errorBody);
+                                    return reactor.core.publisher.Mono.error(
+                                            new RuntimeException("FastAPI error: " + response.statusCode()
+                                                    + " body=" + errorBody)
+                                    );
+                                });
+                    }
+                })
                 .block();
 
         if (fastRes == null || fastRes.result_image_url() == null || fastRes.result_image_url().isBlank()) {
@@ -203,6 +255,7 @@ public class ApplyImageService {
         return fastRes.result_image_url();
     }
 
+
     private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
         String filename = UUID.randomUUID() + ".png";
         Path savePath = Paths.get(uploadDir, "apply", "gen", filename);
@@ -212,14 +265,15 @@ public class ApplyImageService {
             Files.copy(in, savePath, StandardCopyOption.REPLACE_EXISTING);
         }
 
-        // ★ 업로드 폴더 기준 상대 경로를 /images/** URL 로 반환
-        String relativePath = "apply/gen/" + filename;           // 업로드 디렉터리 기준
-        return "/images/" + relativePath.replace("\\", "/");      // 윈도우 대비 슬래시 통일
+        // 업로드 폴더 기준 상대 경로를 /images/** URL 로 반환 (DB에는 이 값 저장)
+        String relativePath = "apply/gen/" + filename;
+        return "/images/" + relativePath.replace("\\", "/");
     }
 
     /**
      * ApplyImage -> ApplyImageResponse 매핑
      * - BouquetResponse (카테고리 포함) 함께 내려줌
+     * - 이미지 URL은 클라이언트에서 바로 쓸 수 있게 풀 URL로 변환
      */
     private ApplyImageResponse toResponse(ApplyImage entity) {
         Bouquet bouquet = entity.getBouquet();
@@ -227,13 +281,16 @@ public class ApplyImageService {
         // 부케 + 카테고리 DTO 생성
         BouquetResponse bouquetResponse = toBouquetResponse(bouquet);
 
+        String srcImageFullUrl = buildFullImageUrl(entity.getSrcImageUrl());
+        String genImageFullUrl = buildFullImageUrl(entity.getGenImageUrl());
+
         return new ApplyImageResponse(
                 entity.getId(),
                 entity.getUser().getId(),
                 bouquet.getId(),
                 entity.getSession() != null ? entity.getSession().getId() : null,
-                entity.getSrcImageUrl(),
-                entity.getGenImageUrl(),
+                srcImageFullUrl,
+                genImageFullUrl,
                 entity.getStatus(),
                 entity.getCreatedAt(),
                 bouquetResponse
@@ -244,13 +301,16 @@ public class ApplyImageService {
         BouquetCategory categories = bouquetCategoryRepository.findByBouquet(bouquet);
         BouquetCategoryResponse categoryResponses = toCategoryResponse(categories);
 
+        // ★ BouquetResponse에도 풀 URL로 세팅
+        String bouquetImageFullUrl = buildFullImageUrl(bouquet.getImageUrl());
+
         return BouquetResponse.builder()
                 .id(bouquet.getId())
                 .name(bouquet.getName())
                 .price(bouquet.getPrice())
                 .reason(bouquet.getReason())
                 .description(bouquet.getDescription())
-                .imageUrl(bouquet.getImageUrl())
+                .imageUrl(bouquetImageFullUrl)
                 .categories(categoryResponses)
                 .build();
     }
@@ -275,6 +335,25 @@ public class ApplyImageService {
             return "";
         }
         return filename.substring(idx + 1);
+    }
+
+    // ★ 공통: /images/... 또는 http... 다 받아서 풀 URL로 바꿔주는 함수
+    private String buildFullImageUrl(String path) {
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+
+        // 이미 절대 URL이면 그대로 사용
+        if (path.startsWith("http://") || path.startsWith("https://")) {
+            return path;
+        }
+
+        String resultPath = path;
+        if (!resultPath.startsWith("/")) {
+            resultPath = "/" + resultPath;
+        }
+
+        return serverBaseUrl + resultPath;
     }
 
     private record FastApiCompositeResponse(
