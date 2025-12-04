@@ -37,6 +37,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -87,35 +88,72 @@ public class ApplyImageService {
         }
 
         try {
-            // 2. 유저 원본 이미지 서버에 저장
+            // 2. 유저 원본 이미지 서버에 저장 → srcImageUrl
             String srcImageUrl = saveUserSrcImage(userImageFile);   // "/images/apply/src/xxxx.png"
 
-            // 3. 부케 이미지 바이트 가져오기
-            byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
-
-            // 4. FastAPI 호출해서 합성 이미지 URL 받기
-            String resultImageUrlFromFastApi = callFastApiComposite(userImageFile, bouquetBytes);
-
-            // 5. 결과 이미지 다운로드해서 우리 서버에 저장
-            String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi); // "/images/apply/gen/xxxx.png"
-
-            // 6. ApplyImage 엔티티 저장
+            // 3. ApplyImage 엔티티를 PENDING 상태로 먼저 저장 (genImageUrl은 아직 없음)
             ApplyImage applyImage = ApplyImage.builder()
                     .user(user)
                     .bouquet(bouquet)
                     .session(session)
                     .srcImageUrl(srcImageUrl)
-                    .genImageUrl(genImageUrl)
-                    .status(ApplyStatus.DONE)
+                    .genImageUrl("")               // NOT NULL 컬럼이라 빈 문자열
+                    .status(ApplyStatus.PENDING)   // 상태 PENDING으로 시작
                     .build();
 
             ApplyImage saved = applyImageRepository.save(applyImage);
 
+            // 4. 비동기로 합성 작업 시작 (MultipartFile 그대로 넘김)
+            startCompositeAsync(saved.getId(), bouquet.getId(), userImageFile);
+
+            // 5. 바로 응답 (status = PENDING, genImageUrl = null로 내려감)
             return toResponse(saved);
+
         } catch (IOException e) {
             log.error("createApplyImage IOException", e);
             throw new RuntimeException("이미지 처리 중 오류가 발생했습니다.", e);
         }
+    }
+    private void startCompositeAsync(Long applyImageId, Long bouquetId, MultipartFile userImageFile) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                log.info("Async composite start. applyImageId={}, bouquetId={}", applyImageId, bouquetId);
+
+                // 1) ApplyImage, Bouquet 다시 조회 (repository가 자체 @Transactional 달고 있음)
+                ApplyImage applyImage = applyImageRepository.findById(applyImageId)
+                        .orElseThrow(() -> new IllegalArgumentException("ApplyImage not found. id=" + applyImageId));
+
+                Bouquet bouquet = bouquetRepository.findById(bouquetId)
+                        .orElseThrow(() -> new IllegalArgumentException("Bouquet not found. id=" + bouquetId));
+
+                // 2) 부케 이미지 바이트 로딩 (기존 메서드 그대로 사용)
+                byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
+
+                // 3) FastAPI 호출 (시그니처 그대로: MultipartFile + byte[])
+                String resultImageUrlFromFastApi = callFastApiComposite(userImageFile, bouquetBytes);
+
+                // 4) 결과 이미지 다운로드 → 우리 서버에 저장
+                String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi);
+
+                // 5) 상태 DONE + genImageUrl 업데이트
+                applyImage.markDone(genImageUrl);
+                applyImageRepository.save(applyImage);
+
+                log.info("Async composite done. applyImageId={}, genImageUrl={}", applyImageId, genImageUrl);
+
+            } catch (Exception e) {
+                log.error("Async composite failed. applyImageId=" + applyImageId, e);
+                // 실패 시 상태 FAILED만 찍어 둔다
+                try {
+                    applyImageRepository.findById(applyImageId).ifPresent(ai -> {
+                        ai.markFailed();
+                        applyImageRepository.save(ai);
+                    });
+                } catch (Exception ex) {
+                    log.error("Failed to mark ApplyImage as FAILED. id=" + applyImageId, ex);
+                }
+            }
+        });
     }
 
     @Transactional(readOnly = true)
