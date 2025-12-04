@@ -2,7 +2,7 @@ name: spring_cicd_bouquet
 
 on:
   push:
-    branches: [ develop ]
+    branches: [ main ]
     paths:
       - '**/src/**'
       - '**/build.gradle*'
