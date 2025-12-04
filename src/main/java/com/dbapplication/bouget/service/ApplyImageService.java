@@ -67,7 +67,6 @@ public class ApplyImageService {
      * 5) FastAPI result_image_url 로 결과 이미지 다운로드 → 우리 서버에 저장 → genImageUrl
      * 6) ApplyImage 엔티티 저장
      */
-    @Transactional
     public ApplyImageResponse createApplyImage(
             Long userId,
             Long bouquetId,
@@ -128,10 +127,10 @@ public class ApplyImageService {
 
                 // 2) 부케 이미지 바이트 로딩 (기존 메서드 그대로 사용)
                 byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
-
+                log.info("부케이미지 바이트 로딩 성공");
                 // 3) FastAPI 호출 (시그니처 그대로: MultipartFile + byte[])
                 String resultImageUrlFromFastApi = callFastApiComposite(userImageFile, bouquetBytes);
-
+                log.info("fastAPI 호출 성공");
                 // 4) 결과 이미지 다운로드 → 우리 서버에 저장
                 String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi);
 

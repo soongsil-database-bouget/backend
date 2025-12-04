@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -18,7 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
-
+@Slf4j
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/virtual-fittings")
@@ -62,6 +63,7 @@ public class ApplyImageController {
                 userImage
         );
         // 현재 구현은 동기 합성(완료 후 결과 반환) 기준으로 200 OK 사용
+        log.info("create image 요청");
         return ResponseEntity.ok(response);
     }
     /**
@@ -110,6 +112,7 @@ public class ApplyImageController {
             @PathVariable("id") Long id
     ) {
         ApplyImageResponse response = applyImageService.getApplyImage(id);
+        log.info("단건 apply image 조회 요청");
         return ResponseEntity.ok(response);
     }
 }
