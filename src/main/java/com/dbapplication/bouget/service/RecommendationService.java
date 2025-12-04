@@ -42,8 +42,8 @@ public class RecommendationService {
     private final AuthService authService;
 
     // 가중치 상수
-    private static final int WEIGHT_SEASON          = 10;
-    private static final int WEIGHT_SILHOUETTE      = 9;
+    private static final int WEIGHT_SILHOUETTE      = 10;
+    private static final int WEIGHT_SEASON          = 9;
     private static final int WEIGHT_ATMOSPHERE      = 8;
     private static final int WEIGHT_DRESS_MOOD      = 7;
     private static final int WEIGHT_WEDDING_COLOR   = 7;
