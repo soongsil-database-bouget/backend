@@ -51,9 +51,24 @@ public class ApplyImage {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     @Builder.Default
-    private ApplyStatus status = ApplyStatus.DONE;
+    private ApplyStatus status = ApplyStatus.PENDING;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
+
+    // ===== 상태 변경 메서드 =====
+    public void markPending() {
+        this.status = ApplyStatus.PENDING;
+        this.genImageUrl = "";
+    }
+
+    public void markDone(String genImageUrl) {
+        this.genImageUrl = genImageUrl;
+        this.status = ApplyStatus.DONE;
+    }
+
+    public void markFailed() {
+        this.status = ApplyStatus.FAILED;
+    }
 }

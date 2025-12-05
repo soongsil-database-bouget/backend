@@ -37,6 +37,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -66,7 +67,6 @@ public class ApplyImageService {
      * 5) FastAPI result_image_url 로 결과 이미지 다운로드 → 우리 서버에 저장 → genImageUrl
      * 6) ApplyImage 엔티티 저장
      */
-    @Transactional
     public ApplyImageResponse createApplyImage(
             Long userId,
             Long bouquetId,
@@ -87,36 +87,77 @@ public class ApplyImageService {
         }
 
         try {
-            // 2. 유저 원본 이미지 서버에 저장
+            // 2. 유저 원본 이미지 서버에 저장 → srcImageUrl
             String srcImageUrl = saveUserSrcImage(userImageFile);   // "/images/apply/src/xxxx.png"
 
-            // 3. 부케 이미지 바이트 가져오기
-            byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
-
-            // 4. FastAPI 호출해서 합성 이미지 URL 받기
-            String resultImageUrlFromFastApi = callFastApiComposite(userImageFile, bouquetBytes);
-
-            // 5. 결과 이미지 다운로드해서 우리 서버에 저장
-            String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi); // "/images/apply/gen/xxxx.png"
-
-            // 6. ApplyImage 엔티티 저장
+            // 3. ApplyImage 엔티티를 PENDING 상태로 먼저 저장 (genImageUrl은 아직 없음)
             ApplyImage applyImage = ApplyImage.builder()
                     .user(user)
                     .bouquet(bouquet)
                     .session(session)
                     .srcImageUrl(srcImageUrl)
-                    .genImageUrl(genImageUrl)
-                    .status(ApplyStatus.DONE)
+                    .genImageUrl("")               // NOT NULL 컬럼이라 빈 문자열
+                    .status(ApplyStatus.PENDING)   // 상태 PENDING으로 시작
                     .build();
 
             ApplyImage saved = applyImageRepository.save(applyImage);
 
+            // 4. 비동기로 합성 작업 시작
+            startCompositeAsync(saved.getId(), bouquet.getId(), srcImageUrl);
+
+            // 5. 바로 응답 (status = PENDING, genImageUrl = null로 내려감)
             return toResponse(saved);
+
         } catch (IOException e) {
             log.error("createApplyImage IOException", e);
             throw new RuntimeException("이미지 처리 중 오류가 발생했습니다.", e);
         }
     }
+    private void startCompositeAsync(Long applyImageId, Long bouquetId, String srcImageUrl) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                log.info("Async composite start. applyImageId={}, bouquetId={}", applyImageId, bouquetId);
+
+                ApplyImage applyImage = applyImageRepository.findById(applyImageId)
+                        .orElseThrow(() -> new IllegalArgumentException("ApplyImage not found. id=" + applyImageId));
+
+                Bouquet bouquet = bouquetRepository.findById(bouquetId)
+                        .orElseThrow(() -> new IllegalArgumentException("Bouquet not found. id=" + bouquetId));
+
+                // 1) 유저 이미지: 우리가 저장해둔 파일에서 다시 읽기
+                byte[] userImageBytes = loadSrcImageBytes(applyImage.getSrcImageUrl());
+                String userFilename = extractFilenameFromImageUrl(applyImage.getSrcImageUrl());
+
+                // 2) 부케 이미지: 기존 방식 그대로
+                byte[] bouquetBytes = loadBouquetImageBytes(bouquet);
+
+                // 3) FastAPI 호출 (이제 MultipartFile 말고 byte[] 기반)
+                String resultImageUrlFromFastApi =
+                        callFastApiComposite(userImageBytes, userFilename, bouquetBytes);
+
+                // 4) 결과 이미지 저장
+                String genImageUrl = downloadAndSaveGeneratedImage(resultImageUrlFromFastApi);
+
+                // 5) 상태 DONE 처리
+                applyImage.markDone(genImageUrl);
+                applyImageRepository.save(applyImage);
+
+                log.info("Async composite done. applyImageId={}, genImageUrl={}", applyImageId, genImageUrl);
+
+            } catch (Exception e) {
+                log.error("Async composite failed. applyImageId=" + applyImageId, e);
+                try {
+                    applyImageRepository.findById(applyImageId).ifPresent(ai -> {
+                        ai.markFailed();
+                        applyImageRepository.save(ai);
+                    });
+                } catch (Exception ex) {
+                    log.error("Failed to mark ApplyImage as FAILED. id=" + applyImageId, ex);
+                }
+            }
+        });
+    }
+
 
     @Transactional(readOnly = true)
     public Page<ApplyImageResponse> getApplyImagesByUser(Long userId, Pageable pageable) {
@@ -201,19 +242,69 @@ public class ApplyImageService {
         // 그래도 모르겠으면 PNG 하나로 통일해도 됨
         return MediaType.IMAGE_PNG;
     }
+    private byte[] loadSrcImageBytes(String srcImageUrl) throws IOException {
+        if (srcImageUrl == null || srcImageUrl.isBlank()) {
+            throw new IllegalStateException("srcImageUrl is empty");
+        }
 
-    private String callFastApiComposite(MultipartFile userImageFile, byte[] bouquetImageBytes) {
+        String pathPart = srcImageUrl;
+
+        // 절대 URL로 들어올 수도 있으니 /images/부터 잘라냄
+        if (pathPart.startsWith("http://") || pathPart.startsWith("https://")) {
+            int idx = pathPart.indexOf("/images/");
+            if (idx == -1) {
+                throw new IllegalStateException("srcImageUrl must contain /images/. url=" + srcImageUrl);
+            }
+            pathPart = pathPart.substring(idx); // "/images/..."
+        }
+
+        if (!pathPart.startsWith("/images/")) {
+            throw new IllegalStateException("srcImageUrl must start with /images/. url=" + srcImageUrl);
+        }
+
+        String relative = pathPart.substring("/images/".length()); // "apply/src/xxxx.png"
+        Path path = Paths.get(uploadDir, relative);
+        return Files.readAllBytes(path);
+    }
+
+    private String extractFilenameFromImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return "user.png";
+        }
+        int idx = imageUrl.lastIndexOf('/');
+        if (idx >= 0 && idx < imageUrl.length() - 1) {
+            return imageUrl.substring(idx + 1);
+        }
+        return "user.png";
+    }
+
+    private String callFastApiComposite(
+            byte[] userImageBytes,
+            String userFilename,
+            byte[] bouquetImageBytes
+    ) {
         MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
 
-        // user_image
-        String userFilename = userImageFile.getOriginalFilename();
-        MediaType userMediaType = resolveImageMediaType(userFilename, userImageFile.getContentType());
+        if (userFilename == null || userFilename.isBlank()) {
+            userFilename = "user.png";
+        }
 
-        bodyBuilder.part("user_image", userImageFile.getResource())
+        MediaType userMediaType = resolveImageMediaType(userFilename, null);
+
+        // user_image
+        String finalUserFilename = userFilename;
+        ByteArrayResource userResource = new ByteArrayResource(userImageBytes) {
+            @Override
+            public String getFilename() {
+                return finalUserFilename;
+            }
+        };
+
+        bodyBuilder.part("user_image", userResource)
                 .filename(userFilename)
                 .contentType(userMediaType);
 
-        // bouquet_image
+        // bouquet_image (기존이랑 동일)
         ByteArrayResource bouquetResource = new ByteArrayResource(bouquetImageBytes) {
             @Override
             public String getFilename() {
@@ -223,7 +314,7 @@ public class ApplyImageService {
 
         bodyBuilder.part("bouquet_image", bouquetResource)
                 .filename("bouquet.png")
-                .contentType(MediaType.IMAGE_PNG);  // PNG로 고정
+                .contentType(MediaType.IMAGE_PNG);
 
         FastApiCompositeResponse fastRes = fastapiWebClient.post()
                 .uri("/api/composite-bouquet")
@@ -254,6 +345,7 @@ public class ApplyImageService {
         log.info("FastAPI composite result url = {}", fastRes.result_image_url());
         return fastRes.result_image_url();
     }
+
 
 
     private String downloadAndSaveGeneratedImage(String resultImageUrl) throws IOException {
